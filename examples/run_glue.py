@@ -648,9 +648,7 @@ def main():
                         preds = torch.argmax(logits.logits, dim=1).flatten()
                         all_preds.extend(preds.tolist())
                         probs.extend(logits.logits[:,1].tolist())
-                    self._wandb.log(log_confusion_matrix(self.eval_dataloader['label'], all_preds, self.labels), commit=True)
-                    self._wandb.log(plot_calibration_curve(self.eval_dataloader['label'], probs),
-                                    commit=False)
+                    self._wandb.log(log_confusion_matrix(self.eval_dataloader['label'], all_preds, self.labels)|plot_calibration_curve(self.eval_dataloader['label'], probs), commit=True)
                     return
     trainer = Trainer(
         model=model,
