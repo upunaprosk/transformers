@@ -22,10 +22,13 @@ import sys
 from dataclasses import dataclass, field
 from typing import Optional
 
-import datasets
 import numpy as np
+import datasets
 from datasets import load_dataset, load_metric
-
+import plotly.graph_objs as go
+from sklearn.calibration import calibration_curve
+from sklearn.metrics import confusion_matrix
+import plotly.express as px
 import transformers
 from transformers import (
     AutoConfig,
@@ -43,6 +46,7 @@ from transformers import (
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version
 from transformers.utils.versions import require_version
+from transformers.integrations import WandbCallback
 
 MODEL_CLASSES = [
     'bert',
@@ -367,7 +371,7 @@ def main():
         embed_list = list(model.distilbert.embeddings.parameters())
         layer_list = model.distilbert.transformer.layer
 
-    #freezing layers during fine-tuning
+    # freezing layers during fine-tuning
 
     freeze_layers = added_args.freeze_layers
     freeze_embeddings = added_args.freeze_embeddings
@@ -376,7 +380,6 @@ def main():
         for param in embed_list:
             param.requires_grad = False
         print ("Froze Embedding Layer")
-    #print (list(model.bert.embeddings.parameters()))
 
     if freeze_layers is not "":
         layer_indexes = [int(x) for x in freeze_layers.split(",")]
@@ -478,7 +481,7 @@ def main():
                     print ("Only positive indices allowed")
                     sys.exit(1)
                 del(layer_list[layer_idx])
-                print ("Removed Layer: ", layer_idx)
+                print("Removed Layer: ", layer_idx)
 
         # update model config
         if added_args.model_type.lower() == "xlnet":
@@ -548,7 +551,107 @@ def main():
     else:
         data_collator = None
 
-    # Initialize our Trainer
+    def log_confusion_matrix(y_val, y_pred, labels):
+        import wandb
+        confmatrix = confusion_matrix(y_pred, y_val, labels=range(len(labels)))
+        confdiag = np.eye(len(confmatrix)) * confmatrix
+        np.fill_diagonal(confmatrix, 0)
+
+        confmatrix = confmatrix.astype('float')
+        n_confused = np.sum(confmatrix)
+        confmatrix[confmatrix == 0] = np.nan
+        confmatrix = go.Heatmap({'coloraxis': 'coloraxis1', 'x': labels, 'y': labels, 'z': confmatrix,
+                                 'hoverongaps': False,
+                                 'hovertemplate': 'Predicted %{y}<br>Instead of %{x}<br>On %{z} examples<extra></extra>'})
+
+        confdiag = confdiag.astype('float')
+        n_right = np.sum(confdiag)
+        confdiag[confdiag == 0] = np.nan
+        confdiag = go.Heatmap({'coloraxis': 'coloraxis2', 'x': labels, 'y': labels, 'z': confdiag,
+                               'hoverongaps': False,
+                               'hovertemplate': 'Predicted %{y} just right<br>On %{z} examples<extra></extra>'})
+
+        fig = go.Figure((confdiag, confmatrix))
+        transparent = 'rgba(0, 0, 0, 0)'
+        n_total = n_right + n_confused
+        fig.update_layout({'coloraxis1': {'colorscale': [[0, transparent], [0, 'rgba(199, 21, 133, 0.05)'], [1,
+                                                                                                          f'rgba(199, 21, 133, {max(0.2, (n_confused / n_total) ** 0.5)})']],
+                                          'showscale': False}})
+        fig.update_layout({'coloraxis2': {
+            'colorscale': [[0, transparent], [0, f'rgba(60, 179, 113, {min(0.8, (n_right / n_total) ** 2)})'],
+                           [1, 'rgba(60, 179, 113, 1)']], 'showscale': False}})
+
+        xaxis = {'title': {'text': 'True label'}, 'showticklabels': False}
+        yaxis = {'title': {'text': 'Predicted label'}, 'showticklabels': False}
+
+        fig.update_layout(title={'text': 'Confusion matrix', 'x': 0.5}, paper_bgcolor=transparent,
+                          plot_bgcolor=transparent, xaxis=xaxis, yaxis=yaxis)
+
+        return {'confusion_matrix': wandb.data_types.Plotly(fig)}
+
+    def plot_calibration_curve(y_test, probs):
+        """Plot calibration curve for est w/o and with calibration. """
+        import wandb
+        frac_of_pos, mean_pred_value = calibration_curve(y_test, probs, n_bins=10, normalize = True)
+        fig = px.line(x=mean_pred_value,
+                y=frac_of_pos,
+                title="Calibration plot",
+                labels={
+                     "x": "",
+                     "y": "Fraction of positives"
+                })
+        fig.update_yaxes(range=[-0.05, 1.05], autorange=False)
+        fig.add_shape(type="line",
+                      x0=0, y0=0, x1=1, y1=1,
+                      line=dict(
+                          color="LightSeaGreen",
+                          width=4,
+                          dash="dashdot",
+                      )
+                      )
+        return {'calibration_plot': wandb.data_types.Plotly(fig)}
+
+    class WandbClassificationCallback(WandbCallback):
+        """
+        A [`TrainerCallback`] that sends the logs to [Weight and Biases](https://www.wandb.com/).
+        """
+
+        def __init__(self, eval_dataloader = None, log_confusion_matrix=False, labels = None):
+            super().__init__()
+            self.eval_dataloader = eval_dataloader
+            self.log_confusion_matrix = log_confusion_matrix
+            self.labels = labels
+        def on_epoch_end(self, args, state, control, model=None, tokenizer=None, **kwargs):
+            if self._wandb is None:
+                return
+            if self.log_confusion_matrix:
+                import torch
+                from torch.utils.data import DataLoader
+                if self.eval_dataloader is None:
+                    wandb.termwarn(
+                        "No eval_dataloader, pass a generator to the callback.")
+                elif self.eval_dataloader and len(self.eval_dataloader) > 0:
+                    model.eval()
+                    all_preds = []
+                    probs = []
+                    evaluation_dataloader = DataLoader(
+                        self.eval_dataloader,
+                        batch_size=args.per_device_train_batch_size,
+                        num_workers=args.dataloader_num_workers,
+                        pin_memory=args.dataloader_pin_memory,
+                    )
+                    for step, inputs in enumerate(evaluation_dataloader):
+                        b_input_ids = torch.as_tensor(np.array([t.numpy() for t in inputs["input_ids"]]).T).to(args.device)
+                        b_attn_mask = torch.as_tensor(np.array([t.numpy() for t in inputs["attention_mask"]]).T).to(args.device)
+                        with torch.no_grad():
+                            logits = model(b_input_ids, b_attn_mask)
+                        preds = torch.argmax(logits.logits, dim=1).flatten()
+                        all_preds.extend(preds.tolist())
+                        probs.extend(logits.logits[:,1].tolist())
+                    self._wandb.log(log_confusion_matrix(self.eval_dataloader['label'], all_preds, self.labels), commit=True)
+                    self._wandb.log(plot_calibration_curve(self.eval_dataloader['label'], probs),
+                                    commit=False)
+                    return
     trainer = Trainer(
         model=model,
         args=training_args,
@@ -557,8 +660,10 @@ def main():
         compute_metrics=compute_metrics,
         tokenizer=tokenizer,
         data_collator=data_collator,
-    )
-
+        callbacks = [WandbClassificationCallback(log_confusion_matrix=True,
+                                    eval_dataloader=eval_dataset if training_args.do_eval else train_dataset,
+                                    labels=label_list),
+    ])
     # Training
     if training_args.do_train:
         checkpoint = None
