@@ -46,7 +46,7 @@ from transformers import (
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version
 from transformers.utils.versions import require_version
-from transformers.integrations import WandbCallback
+from transformers.integrations import WandbCallback,TrainerCallback
 
 MODEL_CLASSES = [
     'bert',
@@ -100,7 +100,7 @@ class DataTrainingArguments:
         default=128,
         metadata={
             "help": "The maximum total input sequence length after tokenization. Sequences longer "
-            "than this will be truncated, sequences shorter will be padded."
+                    "than this will be truncated, sequences shorter will be padded."
         },
     )
     overwrite_cache: bool = field(
@@ -110,28 +110,28 @@ class DataTrainingArguments:
         default=True,
         metadata={
             "help": "Whether to pad all samples to `max_seq_length`. "
-            "If False, will pad the samples dynamically when batching to the maximum length in the batch."
+                    "If False, will pad the samples dynamically when batching to the maximum length in the batch."
         },
     )
     max_train_samples: Optional[int] = field(
         default=None,
         metadata={
             "help": "For debugging purposes or quicker training, truncate the number of training examples to this "
-            "value if set."
+                    "value if set."
         },
     )
     max_eval_samples: Optional[int] = field(
         default=None,
         metadata={
             "help": "For debugging purposes or quicker training, truncate the number of evaluation examples to this "
-            "value if set."
+                    "value if set."
         },
     )
     max_predict_samples: Optional[int] = field(
         default=None,
         metadata={
             "help": "For debugging purposes or quicker training, truncate the number of prediction examples to this "
-            "value if set."
+                    "value if set."
         },
     )
     train_file: Optional[str] = field(
@@ -156,7 +156,7 @@ class DataTrainingArguments:
             assert train_extension in ["csv", "json"], "`train_file` should be a csv or a json file."
             validation_extension = self.validation_file.split(".")[-1]
             assert (
-                validation_extension == train_extension
+                    validation_extension == train_extension
             ), "`validation_file` should have the same extension (csv or json) as `train_file`."
 
 
@@ -190,7 +190,7 @@ class ModelArguments:
         default=False,
         metadata={
             "help": "Will use the token generated when running `transformers-cli login` (necessary to use this script "
-            "with private models)."
+                    "with private models)."
         },
     )
 
@@ -201,12 +201,13 @@ def main():
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
-    parser.add_argument('--freeze_layers', type=str, default='', help="specify layer numbers to freeze during finetuning e.g. 0,1,2 to freeze first three layers")
+    parser.add_argument('--freeze_layers', type=str, default='',
+                        help="specify layer numbers to freeze during finetuning e.g. 0,1,2 to freeze first three layers")
     parser.add_argument('--freeze_embeddings', action='store_true', help="flag to freeze embeddings")
-    parser.add_argument('--remove_layers', type=str, default='', help="specify layer numbers to remove during finetuning e.g. 0,1,2 to remove first three layers")
+    parser.add_argument('--remove_layers', type=str, default='',
+                        help="specify layer numbers to remove during finetuning e.g. 0,1,2 to remove first three layers")
     parser.add_argument("--model_type", default=None, type=str, required=True,
                         help="Model type selected in the list: " + ", ".join(MODEL_CLASSES))
-
 
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
@@ -286,7 +287,7 @@ def main():
                 train_extension = data_args.train_file.split(".")[-1]
                 test_extension = data_args.test_file.split(".")[-1]
                 assert (
-                    test_extension == train_extension
+                        test_extension == train_extension
                 ), "`test_file` should have the same extension (csv or json) as `train_file`."
                 data_files["test"] = data_args.test_file
             else:
@@ -323,7 +324,6 @@ def main():
             label_list = raw_datasets["train"].unique("label")
             label_list.sort()  # Let's sort it for determinism
             num_labels = len(label_list)
-
 
     # Load pretrained model and tokenizer
     #
@@ -379,16 +379,14 @@ def main():
     if freeze_embeddings:
         for param in embed_list:
             param.requires_grad = False
-        print ("Froze Embedding Layer")
+        print("Froze Embedding Layer")
 
     if freeze_layers is not "":
         layer_indexes = [int(x) for x in freeze_layers.split(",")]
         for layer_idx in layer_indexes:
             for param in list(layer_list[layer_idx].parameters()):
                 param.requires_grad = False
-            print ("Froze Layer: ", layer_idx)
-
-
+            print("Froze Layer: ", layer_idx)
 
     # Preprocessing the raw_datasets
     if data_args.task_name is not None:
@@ -414,9 +412,9 @@ def main():
     # Some models have set the order of the labels to use, so let's make sure we do use it.
     label_to_id = None
     if (
-        model.config.label2id != PretrainedConfig(num_labels=num_labels).label2id
-        and data_args.task_name is not None
-        and not is_regression
+            model.config.label2id != PretrainedConfig(num_labels=num_labels).label2id
+            and data_args.task_name is not None
+            and not is_regression
     ):
         # Some have all caps in their config, some don't.
         label_name_to_id = {k.lower(): v for k, v in model.config.label2id.items()}
@@ -478,9 +476,9 @@ def main():
             layer_indexes.sort(reverse=True)
             for layer_idx in layer_indexes:
                 if layer_idx < 0:
-                    print ("Only positive indices allowed")
+                    print("Only positive indices allowed")
                     sys.exit(1)
-                del(layer_list[layer_idx])
+                del (layer_list[layer_idx])
                 print("Removed Layer: ", layer_idx)
 
         # update model config
@@ -575,7 +573,7 @@ def main():
         transparent = 'rgba(0, 0, 0, 0)'
         n_total = n_right + n_confused
         fig.update_layout({'coloraxis1': {'colorscale': [[0, transparent], [0, 'rgba(199, 21, 133, 0.05)'], [1,
-                                                                                                          f'rgba(199, 21, 133, {max(0.2, (n_confused / n_total) ** 0.5)})']],
+                                                                                                             f'rgba(199, 21, 133, {max(0.2, (n_confused / n_total) ** 0.5)})']],
                                           'showscale': False}})
         fig.update_layout({'coloraxis2': {
             'colorscale': [[0, transparent], [0, f'rgba(60, 179, 113, {min(0.8, (n_right / n_total) ** 2)})'],
@@ -587,41 +585,48 @@ def main():
         fig.update_layout(title={'text': 'Confusion matrix', 'x': 0.5}, paper_bgcolor=transparent,
                           plot_bgcolor=transparent, xaxis=xaxis, yaxis=yaxis)
 
-        return {'confusion_matrix': wandb.data_types.Plotly(fig)}
+        return {'Confusion matrix': wandb.data_types.Plotly(fig)}
 
     def plot_calibration_curve(y_test, probs):
         """Plot calibration curve for est w/o and with calibration. """
         import wandb
-        frac_of_pos, mean_pred_value = calibration_curve(y_test, probs, n_bins=10, normalize = True)
-        fig = px.line(x=mean_pred_value,
-                y=frac_of_pos,
-                title="Calibration plot",
-                labels={
-                     "x": "",
-                     "y": "Fraction of positives"
-                })
+        frac_of_pos, mean_pred_value = calibration_curve(y_test, probs, n_bins=10)
+        fig = px.line(x=[0] + mean_pred_value.tolist() + [1],
+                      y=[0] + frac_of_pos.tolist() + [1],
+                      title="Calibration plot",
+                      labels={
+                          "x": "",
+                          "y": "Fraction of positives"
+                      })
         fig.update_yaxes(range=[-0.05, 1.05], autorange=False)
         fig.add_shape(type="line",
                       x0=0, y0=0, x1=1, y1=1,
                       line=dict(
                           color="LightSeaGreen",
                           width=4,
-                          dash="dashdot",
-                      )
-                      )
-        return {'calibration_plot': wandb.data_types.Plotly(fig)}
+                          dash="dashdot", ))
+
+        counts, bins = np.histogram(probs)
+        bins = 0.5 * (bins[:-1] + bins[1:])
+
+        fig2 = px.bar(x=bins, y=counts, labels={'x': 'Mean predicted value', 'y': 'Count'})
+        return {'Calibration plot': wandb.data_types.Plotly(fig), 'Confidence scores plot': wandb.data_types.Plotly(fig2)}
 
     class WandbClassificationCallback(WandbCallback):
         """
         A [`TrainerCallback`] that sends the logs to [Weight and Biases](https://www.wandb.com/).
         """
 
-        def __init__(self, eval_dataloader = None, log_confusion_matrix=False, labels = None):
+        def __init__(self, eval_dataloader=None, log_confusion_matrix=False, labels=None):
             super().__init__()
+            import wandb
+            self._wandb = wandb
             self.eval_dataloader = eval_dataloader
             self.log_confusion_matrix = log_confusion_matrix
             self.labels = labels
-        def on_epoch_end(self, args, state, control, model=None, tokenizer=None, **kwargs):
+            self.probs = []
+
+        def on_epoch_begin(self, args, state, control, model=None, tokenizer=None, **kwargs):
             if self._wandb is None:
                 return
             if self.log_confusion_matrix:
@@ -641,15 +646,21 @@ def main():
                         pin_memory=args.dataloader_pin_memory,
                     )
                     for step, inputs in enumerate(evaluation_dataloader):
-                        b_input_ids = torch.as_tensor(np.array([t.numpy() for t in inputs["input_ids"]]).T).to(args.device)
-                        b_attn_mask = torch.as_tensor(np.array([t.numpy() for t in inputs["attention_mask"]]).T).to(args.device)
+                        b_input_ids = torch.as_tensor(np.array([t.numpy() for t in inputs["input_ids"]]).T).to(
+                            args.device)
+                        b_attn_mask = torch.as_tensor(np.array([t.numpy() for t in inputs["attention_mask"]]).T).to(
+                            args.device)
                         with torch.no_grad():
                             logits = model(b_input_ids, b_attn_mask)
                         preds = torch.argmax(logits.logits, dim=1).flatten()
                         all_preds.extend(preds.tolist())
-                        probs.extend(logits.logits[:,1].tolist())
-                    self._wandb.log(log_confusion_matrix(self.eval_dataloader['label'], all_preds, self.labels)|plot_calibration_curve(self.eval_dataloader['label'], probs), commit=True)
-                    return
+                        probs_step = torch.nn.functional.softmax(logits.logits, dim=-1)
+                        probs.extend(probs_step[:, 1].tolist())
+                    self._wandb.run.log(log_confusion_matrix(self.eval_dataloader['label'], all_preds, self.labels),
+                                        commit=True)
+                    self.probs = probs
+            self._wandb.run.log(plot_calibration_curve(self.eval_dataloader['label'], self.probs), commit=False)
+
     trainer = Trainer(
         model=model,
         args=training_args,
@@ -658,10 +669,10 @@ def main():
         compute_metrics=compute_metrics,
         tokenizer=tokenizer,
         data_collator=data_collator,
-        callbacks = [WandbClassificationCallback(log_confusion_matrix=True,
-                                    eval_dataloader=eval_dataset if training_args.do_eval else train_dataset,
-                                    labels=label_list),
-    ])
+        callbacks=[WandbClassificationCallback(log_confusion_matrix=True,
+                                               eval_dataloader=eval_dataset if training_args.do_eval else train_dataset,
+                                               labels=label_list),
+                   ])
     # Training
     if training_args.do_train:
         checkpoint = None
